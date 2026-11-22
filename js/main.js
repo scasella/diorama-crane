@@ -9,7 +9,7 @@ import { HeadTracker } from './tracker.js';
 
 // Shown at the bottom of the menu, so it is clear which copy a phone is running: a web host and
 // a Home Screen icon can both hold on to an older one for a while.
-const BUILD = '2026-11-22.1';
+const BUILD = '2026-11-22.2';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view');
@@ -94,6 +94,34 @@ const tracker = new HeadTracker($('camera'));
 let world = null;
 let rig = null;
 let previewActive = false;
+
+// ---- Hinge angle from the motion sensor (experimental; off unless switched on in the menu).
+//
+// Safari gives a page no hinge angle. What a page can ask for is the tilt of the phone, which is
+// really the tilt of whichever half holds the sensor. In the laptop posture, with the lower half
+// lying flat on a table, the upper half's tilt IS the fold: `beta` is the rotation about the
+// screen's left-to-right axis (0 lying flat, 90 standing up), so hinge = 180 - beta. It only
+// works if the sensor is in the upper half, which the probe page can test on a real phone, and
+// it says nothing when the phone is held in the hand or folded like a book.
+const hingeSensor = { on: false, permission: null, beta: null, gamma: null, lastEvent: 0, smoothed: null, events: 0 };
+addEventListener('deviceorientation', (e) => {
+  if (!hingeSensor.on || e.beta == null) return;
+  hingeSensor.beta = e.beta;
+  hingeSensor.gamma = e.gamma;
+  hingeSensor.lastEvent = performance.now();
+  hingeSensor.events++;
+});
+/** The measured hinge angle in degrees, or null when the sensor is off, silent or not applicable. */
+function sensedHinge(dt, axis) {
+  if (!hingeSensor.on || axis !== 'horizontal' || performance.now() - hingeSensor.lastEvent > 1000) {
+    hingeSensor.smoothed = null;
+    return null;
+  }
+  const target = clamp(180 - hingeSensor.beta, 40, 180);
+  hingeSensor.smoothed = hingeSensor.smoothed === null ? target : hingeSensor.smoothed + (target - hingeSensor.smoothed) * (1 - Math.exp(-dt / 0.1));
+  return hingeSensor.smoothed;
+}
+let hingeDegrees = 180;
 let renderScale = fixedScale ? clamp(fixedScale, 0.3, 1) : 1;
 
 if (param.num('eyeAz') !== null || param.num('eyeEl') !== null) {
@@ -198,10 +226,12 @@ function frame(timeMs) {
   const dpr = canvas.width / canvas.clientWidth;
   // Snap the fold to a whole device pixel so the two WebGL viewports meet exactly on it.
   const foldPoints = Math.round(L.fold * dpr) / dpr;
+  const measured = folded ? sensedHinge(dt, L.axis) : null;
+  hingeDegrees = measured !== null ? measured : settings.foldAngle;
   const input = {
     sizePoints: [canvas.clientWidth, canvas.clientHeight],
     pixelsPerPoint: dpr,
-    hingeAngle: folded ? settings.foldAngle * DEG : null,
+    hingeAngle: folded ? hingeDegrees * DEG : null,
     foldAxis: L.axis,
     foldPoints,
     cameraEdge: L.cameraEdge,
@@ -235,7 +265,10 @@ function frame(timeMs) {
     fpsWindow.frames = 0;
   }
   adaptQuality(dt);
-  if (frameCount % 10 === 0) updateStatus();
+  if (frameCount % 10 === 0) {
+    updateStatus();
+    if (hingeSensor.on && !menu.hidden) refreshFoldSensor();
+  }
   updateFoldLine(L, foldPoints, folded);
   if (dumpEnabled && frameCount % 15 === 0) dumpFrame(L, eyes);
 }
@@ -310,6 +343,7 @@ function dumpFrame(L, eyes) {
     page: { innerWidth: L.iw, innerHeight: L.ih, outerWidth: L.ow, outerHeight: L.oh, chromeTop: L.chromeTop, dpr, renderScale,
       foldAxis: L.axis, foldPoints: L.fold, standalone, cameraEdge: L.cameraEdge, userAgent: ua, metrics: pageMetrics() },
     tracker: { state: tracker.state, ...tracker.stats },
+    hingeSensor: { ...hingeSensor, hingeDegrees },
     settings,
     control: param.str('ctl'),
   };
@@ -483,8 +517,11 @@ function refreshMenu() {
   $('optFold').checked = settings.foldOn;
   $('foldAngleRow').hidden = !settings.foldOn;
   $('foldNudgeRow').hidden = !settings.foldOn;
+  $('foldSensorRow').hidden = !settings.foldOn || !('DeviceOrientationEvent' in window);
+  $('optFoldSensor').checked = hingeSensor.on;
   $('optFoldAngle').value = String(settings.foldAngle);
   $('foldAngleOut').textContent = settings.foldAngle + '°';
+  refreshFoldSensor();
   const axis = layout().axis;
   const nudge = settings.foldNudge[axis];
   $('foldNudgeOut').textContent = (nudge > 0 ? '+' : '') + nudge + ' pt';
@@ -522,6 +559,48 @@ $('optFoldAngle').addEventListener('input', (e) => {
   $('foldAngleOut').textContent = settings.foldAngle + '°';
 });
 $('optFoldAngle').addEventListener('change', save);
+/** Keeps the sensor row's note, and the slider it overrides, in step with what is being measured. */
+function refreshFoldSensor() {
+  const note = $('foldSensorNote'), slider = $('optFoldAngle');
+  const live = hingeSensor.on && hingeSensor.smoothed !== null;
+  slider.disabled = live;
+  if (live) {
+    const degrees = Math.round(hingeSensor.smoothed);
+    slider.value = String(clamp(degrees, 60, 178));
+    $('foldAngleOut').textContent = degrees + '° measured';
+    note.textContent = 'Reading ' + degrees + '°. If this does not follow the fold, switch it off and use the slider.';
+  } else if (hingeSensor.on) {
+    $('foldAngleOut').textContent = settings.foldAngle + '°';
+    note.textContent = performance.now() - hingeSensor.lastEvent > 1000 && hingeSensor.events === 0
+      ? 'Waiting for the sensor…'
+      : 'Only in portrait. Using the slider for now.';
+  } else {
+    note.textContent = hingeSensor.permission === 'denied'
+      ? 'Motion access was refused for this page.'
+      : 'Experimental. Portrait, with the lower half lying flat on a table.';
+  }
+}
+$('optFoldSensor').addEventListener('change', async (e) => {
+  if (!e.target.checked) {
+    hingeSensor.on = false;
+    hingeSensor.smoothed = null;
+    refreshMenu();
+    return;
+  }
+  // Safari only shows its motion prompt in answer to a tap, which this is.
+  let answer = 'granted';
+  try {
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') answer = await DeviceOrientationEvent.requestPermission();
+  } catch (_) {
+    answer = 'denied';
+  }
+  hingeSensor.permission = answer;
+  hingeSensor.on = answer === 'granted';
+  hingeSensor.events = 0;
+  hingeSensor.lastEvent = 0;
+  refreshMenu();
+});
+
 function nudgeFold(by) {
   const axis = layout().axis;
   settings.foldNudge[axis] = clamp(settings.foldNudge[axis] + by, -120, 120);
@@ -556,7 +635,8 @@ if (settings.camera) {
 }
 
 // For poking at from a console or a test.
-window.dioramaCrane = { settings, eye, tracker, get world() { return world; }, get rig() { return rig; }, get fps() { return fps; },
+window.dioramaCrane = { settings, eye, tracker, hingeSensor, get hingeDegrees() { return hingeDegrees; },
+  get world() { return world; }, get rig() { return rig; }, get fps() { return fps; },
   get renderScale() { return renderScale; }, layout };
 
 canvas.focus({ preventScroll: true });

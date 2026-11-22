@@ -6,7 +6,16 @@
 <title>Probe</title>
 <style>
   html, body { margin: 0; height: 100%; background: #101418; color: #dfe; font: 12px/1.35 ui-monospace, Menlo, monospace; }
+  html, body { height: auto; min-height: 100%; }
   pre { margin: 0; padding: 8px; white-space: pre-wrap; word-break: break-all; }
+  #motion { padding: 12px; border-bottom: 1px solid #345; font: 15px/1.4 -apple-system, system-ui, sans-serif; color: #fff3d6; }
+  #motion h1 { font-size: 17px; margin: 0 0 6px; }
+  #motion ol { padding-left: 22px; margin: 8px 0; }
+  #motion li { margin: 10px 0; }
+  #motion button { font: 600 15px -apple-system, system-ui, sans-serif; padding: 9px 14px; border-radius: 10px; border: 0; background: #ff5a5f; color: #fff; }
+  #motion button:disabled { background: #445; color: #99a; }
+  #motion pre { padding: 8px 0 0; font: 13px/1.4 ui-monospace, Menlo, monospace; color: #dfe; }
+  #mVerdict { font-weight: 700; color: #7df9ff; }
   #env { position: fixed; left: 0; top: 0; width: 0; height: 0; visibility: hidden;
     padding-top: env(safe-area-inset-top, 0px); padding-right: env(safe-area-inset-right, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px); padding-left: env(safe-area-inset-left, 0px); }
@@ -14,6 +23,19 @@
 </head>
 <body>
 <div id="env"></div>
+<div id="motion">
+  <h1>Can the motion sensor measure the fold?</h1>
+  <div>Safari reports nothing about the hinge. The tilt sensor sits in one half of the phone; if it is
+  the half that stands up, its tilt is the hinge angle. With the phone in portrait:</div>
+  <ol>
+    <li><button id="mStart" type="button">Start motion sensor</button> and tap Allow.</li>
+    <li>Open the phone flat on a table, screen up. <button id="mFlat" type="button" disabled>Record flat</button></li>
+    <li>Keep the lower half flat on the table and stand the upper half straight up.
+      <button id="mUp" type="button" disabled>Record upright</button></li>
+  </ol>
+  <pre id="mLive">not started</pre>
+  <pre id="mVerdict"></pre>
+</div>
 <pre id="out">probing…</pre>
 <script>
 const out = document.getElementById('out');
@@ -122,6 +144,7 @@ async function gather() {
   r.misc = { wakeLock: 'wakeLock' in navigator, serviceWorker: 'serviceWorker' in navigator, gamepad: 'getGamepads' in navigator,
     pointerEvents: 'PointerEvent' in window, maxTouchPoints: navigator.maxTouchPoints, hardwareConcurrency: navigator.hardwareConcurrency,
     raf: window.__rafHz || null, hdr: mq('(dynamic-range: high)') };
+  r.motion = window.__motion || null;
   r.events = events.slice();
   return r;
 }
@@ -132,6 +155,80 @@ async function report() {
   out.textContent = text;
   try { await fetch('/__report/probe.json', { method: 'POST', body: text }); } catch (e) {}
 }
+
+// ---- Motion-sensor fold test.
+(() => {
+  const live = document.getElementById('mLive'), verdict = document.getElementById('mVerdict');
+  const start = document.getElementById('mStart'), flat = document.getElementById('mFlat'), up = document.getElementById('mUp');
+  const state = { permission: null, orientation: null, gravity: null, samples: 0, flat: null, upright: null, verdict: null };
+  window.__motion = state;
+  const recent = [];
+  const round = (v) => (v == null ? null : Math.round(v * 10) / 10);
+  // Tilt of the sensor's half away from lying flat, from gravity alone: 0 flat, 90 standing up.
+  const tiltOf = (g) => {
+    const len = Math.hypot(g.x, g.y, g.z);
+    return len > 0 ? Math.acos(Math.min(1, Math.abs(g.z) / len)) * 180 / Math.PI : null;
+  };
+  addEventListener('deviceorientation', (e) => {
+    state.orientation = { alpha: round(e.alpha), beta: round(e.beta), gamma: round(e.gamma) };
+  });
+  addEventListener('devicemotion', (e) => {
+    const g = e.accelerationIncludingGravity;
+    if (!g || g.x == null) return;
+    state.samples++;
+    state.gravity = { x: round(g.x), y: round(g.y), z: round(g.z), tilt: round(tiltOf(g)) };
+    recent.push({ t: performance.now(), x: g.x, y: g.y, z: g.z, beta: state.orientation ? state.orientation.beta : null, gamma: state.orientation ? state.orientation.gamma : null });
+    while (recent.length && performance.now() - recent[0].t > 700) recent.shift();
+  });
+  function snapshot() {
+    if (!recent.length) return null;
+    const mean = (k) => recent.reduce((a, r) => a + (r[k] || 0), 0) / recent.length;
+    const g = { x: mean('x'), y: mean('y'), z: mean('z') };
+    return { beta: round(mean('beta')), gamma: round(mean('gamma')), gravity: { x: round(g.x), y: round(g.y), z: round(g.z) }, tilt: round(tiltOf(g)), samples: recent.length };
+  }
+  function describe() {
+    const o = state.orientation, g = state.gravity;
+    let text = `permission: ${state.permission}   samples: ${state.samples}\n`;
+    text += o ? `orientation  beta ${o.beta}  gamma ${o.gamma}  alpha ${o.alpha}\n` : 'orientation  (no events yet)\n';
+    text += g ? `gravity      x ${g.x}  y ${g.y}  z ${g.z}\ntilt of the sensor's half: ${g.tilt} deg  ->  hinge would be ${round(180 - g.tilt)} deg\n` : 'gravity      (no events yet)\n';
+    if (state.flat) text += `recorded flat:    tilt ${state.flat.tilt}  beta ${state.flat.beta}  gamma ${state.flat.gamma}\n`;
+    if (state.upright) text += `recorded upright: tilt ${state.upright.tilt}  beta ${state.upright.beta}  gamma ${state.upright.gamma}\n`;
+    live.textContent = text;
+  }
+  function judge() {
+    if (!state.flat || !state.upright) return;
+    const change = state.upright.tilt - state.flat.tilt;
+    if (change > 55) state.verdict = `YES: the sensor is in the half that stood up (tilt went ${state.flat.tilt} -> ${state.upright.tilt} deg). The hinge can be measured.`;
+    else if (Math.abs(change) < 20) state.verdict = `NO: the sensor stayed put (tilt ${state.flat.tilt} -> ${state.upright.tilt} deg). It is in the lower half, so it cannot see the hinge in this posture.`;
+    else state.verdict = `UNCLEAR: tilt went ${state.flat.tilt} -> ${state.upright.tilt} deg. Please send this page.`;
+    verdict.textContent = state.verdict;
+    report();
+  }
+  start.addEventListener('click', async () => {
+    try {
+      const asks = [];
+      if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') asks.push(DeviceOrientationEvent.requestPermission());
+      if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function') asks.push(DeviceMotionEvent.requestPermission());
+      const answers = await Promise.all(asks);
+      state.permission = answers.length ? answers.join(', ') : 'not needed';
+    } catch (error) {
+      state.permission = 'error: ' + error;
+    }
+    start.disabled = true;
+    flat.disabled = up.disabled = false;
+    setInterval(describe, 200);
+    setTimeout(() => {
+      if (state.samples) return;
+      verdict.textContent = /denied/.test(String(state.permission))
+        ? 'Motion access was refused. Close this tab, open the page again and tap Allow when asked.'
+        : 'No motion events are arriving on this device.';
+    }, 2500);
+    describe();
+    report();
+  });
+  flat.addEventListener('click', () => { state.flat = snapshot(); describe(); judge(); report(); });
+  up.addEventListener('click', () => { state.upright = snapshot(); describe(); judge(); report(); });
+})();
 
 addEventListener('resize', () => { log('resize ' + innerWidth + 'x' + innerHeight); report(); });
 if (window.visualViewport) visualViewport.addEventListener('resize', () => { log('vv.resize ' + visualViewport.width + 'x' + visualViewport.height); report(); });

@@ -45,6 +45,7 @@
     <section>
       <h2>Fold</h2>
       <label class="row"><span>Device is folded<small>Safari cannot read the hinge, so set it here.</small></span><input type="checkbox" id="optFold"></label>
+      <label class="row" id="foldSensorRow"><span>Measure it with the motion sensor<small id="foldSensorNote"></small></span><input type="checkbox" id="optFoldSensor"></label>
       <div class="row slider" id="foldAngleRow">
         <label for="optFoldAngle">Hinge angle <output id="foldAngleOut"></output></label>
         <input type="range" id="optFoldAngle" min="60" max="178" step="1">
