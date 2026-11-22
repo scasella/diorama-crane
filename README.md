@@ -43,8 +43,8 @@ The bottom of the menu shows which build is running. A phone can hold on to an o
 while after an update; close the Home Screen app and open it again to pick up a new one.
 
 [probe.html](https://scasella.github.io/diorama-crane/probe.html) lists what the browser exposes
-(fold, graphics, camera). It also has a one-minute test of whether the phone's motion sensor
-could measure the hinge angle instead: that depends on which half of the phone the sensor is in.
+(fold, graphics, camera), and has a one-minute test of whether the phone's motion sensor can
+measure the hinge angle. On the iPhone Duo it can: the sensor is in the half that stands up.
 
 ## What Safari cannot tell a page
 
@@ -65,10 +65,10 @@ So the web version asks you for what it cannot measure:
 - **Device is folded** and **Hinge angle** in the menu. Flat is the default. Set the angle
   until the grid lines run straight across the fold. It is remembered.
 - **Measure it with the motion sensor** (experimental) reads the hinge angle from the phone's
-  tilt instead of the slider: in portrait, with the lower half lying flat on a table, the upper
-  half's tilt is the fold. It can only work if the tilt sensor is in the upper half of the
-  phone; `probe.html` has a one-minute test that says which. If the reading does not follow the
-  fold, switch it off.
+  tilt instead of the slider. The tilt sensor is in the upper half of the phone (in portrait),
+  so with the lower half lying flat on a table the upper half's tilt is the fold: hinge = 180°
+  minus tilt. It does not apply when the phone is held in the hand, upside down, or folded like a
+  book; then the slider is used. If the reading does not follow the fold, switch it off.
 - **Fold line** nudges where the page thinks the fold is, one point at a time, with a guide
   line while you adjust. The page works it out from the window: the fold runs through the
   middle of the screen's long side, and Safari's toolbar is above the page. From the Home
@@ -161,8 +161,10 @@ load also ran in the Home Screen app, against the Simulator's blank camera.
   in the menu correct them without touching the code.
 - **A real fold.** The hinge angle is whatever you set, and the fold position rests on the
   Simulator's numbers for where Safari puts the page.
-- **The motion-sensor hinge reading.** It has only been fed simulated sensor readings (hinge =
-  180° minus tilt), and nobody yet knows which half of the phone the sensor is in.
+- **The motion-sensor hinge reading in the game.** A real iPhone Duo confirmed where the sensor
+  is (`probe.html`: laid flat it read 5° of tilt, with the upper half stood up 87°), and the
+  game's sum is tested against those readings. The switch itself has not yet been tried on the
+  phone. Expect about 5° of error: that is what the phone read lying flat.
 - **Physical scale.** 460 ppi is assumed (`?ppi=` overrides it).
 - **Performance on hardware.** The page steps its resolution down by itself if frames run slow.
 - **Arrow keys in Safari on the phone.** Key presses sent to the Simulator never reached the
@@ -178,6 +180,7 @@ web/
     world.js                                     cabinet, prizes, claw, physics
     meshes.js, shaders.js, renderer.js           WebGL2
     eye.js, tracker.js                           viewpoint; camera eye tracking
+    hinge.js                                     hinge angle from the phone's tilt
     hud.js, main.js                              controls; set-up and frame loop
   dev/tracker.html                               head-tracker test
   probe.html                                     what does this browser expose?

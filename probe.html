@@ -190,7 +190,13 @@ async function report() {
     const o = state.orientation, g = state.gravity;
     let text = `permission: ${state.permission}   samples: ${state.samples}\n`;
     text += o ? `orientation  beta ${o.beta}  gamma ${o.gamma}  alpha ${o.alpha}\n` : 'orientation  (no events yet)\n';
-    text += g ? `gravity      x ${g.x}  y ${g.y}  z ${g.z}\ntilt of the sensor's half: ${g.tilt} deg  ->  hinge would be ${round(180 - g.tilt)} deg\n` : 'gravity      (no events yet)\n';
+    text += g ? `gravity      x ${g.x}  y ${g.y}  z ${g.z}   (tilt from gravity alone: ${g.tilt} deg)\n` : 'gravity      (no events yet)\n';
+    if (o && o.beta != null && o.gamma != null) {
+      // The same sum the game does: the angle between the half's screen normal and straight up.
+      const rad = Math.PI / 180;
+      const tilt = Math.acos(Math.max(-1, Math.min(1, Math.cos(o.beta * rad) * Math.cos(o.gamma * rad)))) / rad;
+      text += `tilt of the sensor's half: ${round(tilt)} deg  ->  hinge would be ${round(180 - tilt)} deg\n`;
+    }
     if (state.flat) text += `recorded flat:    tilt ${state.flat.tilt}  beta ${state.flat.beta}  gamma ${state.flat.gamma}\n`;
     if (state.upright) text += `recorded upright: tilt ${state.upright.tilt}  beta ${state.upright.beta}  gamma ${state.upright.gamma}\n`;
     live.textContent = text;

@@ -6,10 +6,11 @@ import { World, makeRoom, sameRoom } from './world.js';
 import { EyeController } from './eye.js';
 import { Joystick, KeyStick, pressButton } from './hud.js';
 import { HeadTracker } from './tracker.js';
+import { hingeFromOrientation, hingeSlope } from './hinge.js';
 
 // Shown at the bottom of the menu, so it is clear which copy a phone is running: a web host and
 // a Home Screen icon can both hold on to an older one for a while.
-const BUILD = '2026-11-22.2';
+const BUILD = '2026-11-22.3';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view');
@@ -98,14 +99,12 @@ let previewActive = false;
 // ---- Hinge angle from the motion sensor (experimental; off unless switched on in the menu).
 //
 // Safari gives a page no hinge angle. What a page can ask for is the tilt of the phone, which is
-// really the tilt of whichever half holds the sensor. In the laptop posture, with the lower half
-// lying flat on a table, the upper half's tilt IS the fold: `beta` is the rotation about the
-// screen's left-to-right axis (0 lying flat, 90 standing up), so hinge = 180 - beta. It only
-// works if the sensor is in the upper half, which the probe page can test on a real phone, and
-// it says nothing when the phone is held in the hand or folded like a book.
-const hingeSensor = { on: false, permission: null, beta: null, gamma: null, lastEvent: 0, smoothed: null, events: 0 };
+// really the tilt of whichever half holds the sensor: on the Duo, the upper half in portrait.
+// With the lower half lying flat on a table, that tilt IS the fold (see hinge.js). It says
+// nothing when the phone is held in the hand, turned upside down, or folded like a book.
+const hingeSensor = { on: false, permission: null, beta: null, gamma: null, lastEvent: 0, smoothed: null, events: 0, state: 'off' };
 addEventListener('deviceorientation', (e) => {
-  if (!hingeSensor.on || e.beta == null) return;
+  if (!hingeSensor.on || e.beta == null || e.gamma == null) return;
   hingeSensor.beta = e.beta;
   hingeSensor.gamma = e.gamma;
   hingeSensor.lastEvent = performance.now();
@@ -113,11 +112,21 @@ addEventListener('deviceorientation', (e) => {
 });
 /** The measured hinge angle in degrees, or null when the sensor is off, silent or not applicable. */
 function sensedHinge(dt, axis) {
-  if (!hingeSensor.on || axis !== 'horizontal' || performance.now() - hingeSensor.lastEvent > 1000) {
+  const upsideDown = (screen.orientation && screen.orientation.type === 'portrait-secondary') || window.orientation === 180;
+  if (!hingeSensor.on) hingeSensor.state = 'off';
+  else if (axis !== 'horizontal' || upsideDown) hingeSensor.state = 'not portrait';
+  else if (performance.now() - hingeSensor.lastEvent > 1000) hingeSensor.state = 'silent';
+  else hingeSensor.state = 'reading';
+  if (hingeSensor.state !== 'reading') {
     hingeSensor.smoothed = null;
     return null;
   }
-  const target = clamp(180 - hingeSensor.beta, 40, 180);
+  // Tipped along the hinge, the phone is in a hand, not on a table: keep the last good reading.
+  if (hingeSlope(hingeSensor.beta) > 0.4) {
+    hingeSensor.state = 'not level';
+    return hingeSensor.smoothed;
+  }
+  const target = clamp(hingeFromOrientation(hingeSensor.beta, hingeSensor.gamma), 40, 180);
   hingeSensor.smoothed = hingeSensor.smoothed === null ? target : hingeSensor.smoothed + (target - hingeSensor.smoothed) * (1 - Math.exp(-dt / 0.1));
   return hingeSensor.smoothed;
 }
@@ -568,16 +577,22 @@ function refreshFoldSensor() {
     const degrees = Math.round(hingeSensor.smoothed);
     slider.value = String(clamp(degrees, 60, 178));
     $('foldAngleOut').textContent = degrees + '° measured';
-    note.textContent = 'Reading ' + degrees + '°. If this does not follow the fold, switch it off and use the slider.';
-  } else if (hingeSensor.on) {
-    $('foldAngleOut').textContent = settings.foldAngle + '°';
-    note.textContent = performance.now() - hingeSensor.lastEvent > 1000 && hingeSensor.events === 0
-      ? 'Waiting for the sensor…'
-      : 'Only in portrait. Using the slider for now.';
-  } else {
+    note.textContent = hingeSensor.state === 'not level'
+      ? 'Holding ' + degrees + '°. Rest the lower half flat on a table to measure.'
+      : 'Reading ' + degrees + '°. If this does not follow the fold, switch it off and use the slider.';
+    return;
+  }
+  $('foldAngleOut').textContent = settings.foldAngle + '°';
+  if (!hingeSensor.on) {
     note.textContent = hingeSensor.permission === 'denied'
       ? 'Motion access was refused for this page.'
       : 'Experimental. Portrait, with the lower half lying flat on a table.';
+  } else if (hingeSensor.state === 'not portrait') {
+    note.textContent = 'Only with the phone upright in portrait. Using the slider for now.';
+  } else if (hingeSensor.state === 'not level') {
+    note.textContent = 'Rest the lower half flat on a table to measure.';
+  } else {
+    note.textContent = 'Waiting for the sensor…';
   }
 }
 $('optFoldSensor').addEventListener('change', async (e) => {
