@@ -1,0 +1,150 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Probe</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #101418; color: #dfe; font: 12px/1.35 ui-monospace, Menlo, monospace; }
+  pre { margin: 0; padding: 8px; white-space: pre-wrap; word-break: break-all; }
+  #env { position: fixed; left: 0; top: 0; width: 0; height: 0; visibility: hidden;
+    padding-top: env(safe-area-inset-top, 0px); padding-right: env(safe-area-inset-right, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px); padding-left: env(safe-area-inset-left, 0px); }
+</style>
+</head>
+<body>
+<div id="env"></div>
+<pre id="out">probing…</pre>
+<script>
+const out = document.getElementById('out');
+const events = [];
+function log(e) { events.push({ t: Math.round(performance.now()), e }); if (events.length > 60) events.shift(); }
+
+function cssEnv(name) {
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed;visibility:hidden;width:env(${name}, -777px);height:0`;
+  document.body.appendChild(el);
+  const w = getComputedStyle(el).width;
+  el.remove();
+  return w;
+}
+function mq(q) { try { return matchMedia(q).matches; } catch (e) { return 'err'; } }
+function names(obj, re) {
+  const found = new Set();
+  for (let o = obj; o; o = Object.getPrototypeOf(o)) {
+    for (const k of Object.getOwnPropertyNames(o)) if (re.test(k)) found.add(k);
+  }
+  return [...found].sort();
+}
+
+async function gather() {
+  const r = {};
+  r.ua = navigator.userAgent;
+  r.time = new Date().toISOString();
+  r.window = { innerWidth, innerHeight, outerWidth, outerHeight, dpr: devicePixelRatio,
+    screenX: window.screenX, screenY: window.screenY, orientation: window.orientation };
+  r.screen = { width: screen.width, height: screen.height, availWidth: screen.availWidth, availHeight: screen.availHeight,
+    orientation: screen.orientation ? { type: screen.orientation.type, angle: screen.orientation.angle } : null };
+  const vv = window.visualViewport;
+  r.visualViewport = vv ? { width: vv.width, height: vv.height, offsetLeft: vv.offsetLeft, offsetTop: vv.offsetTop, scale: vv.scale,
+    segments: vv.segments ? [...vv.segments].map(s => ({ x: s.x, y: s.y, width: s.width, height: s.height })) : (('segments' in vv) ? 'null' : 'absent') } : null;
+  r.devicePosture = navigator.devicePosture ? { type: navigator.devicePosture.type } : 'absent';
+  r.foldNames = {
+    window: names(window, /fold|hinge|postur|segment|spann|dual/i),
+    navigator: names(navigator, /fold|hinge|postur|segment|spann|dual/i),
+    screen: names(screen, /fold|hinge|postur|segment|spann|dual|angle/i),
+    visualViewport: vv ? names(vv, /fold|hinge|postur|segment|spann/i) : [],
+    document: names(document, /fold|hinge|postur|segment|spann/i),
+  };
+  r.media = {};
+  for (const q of ['(device-posture: folded)', '(device-posture: continuous)', '(device-posture: folded-over)',
+    '(horizontal-viewport-segments: 1)', '(horizontal-viewport-segments: 2)', '(vertical-viewport-segments: 1)', '(vertical-viewport-segments: 2)',
+    '(screen-spanning: single-fold-vertical)', '(screen-spanning: single-fold-horizontal)', '(spanning: single-fold-vertical)',
+    '(display-mode: standalone)', '(display-mode: fullscreen)', '(display-mode: browser)', '(orientation: portrait)', '(pointer: coarse)',
+    '(dynamic-range: high)', '(min-resolution: 3dppx)']) r.media[q] = mq(q);
+  r.env = {};
+  for (const n of ['safe-area-inset-top', 'safe-area-inset-right', 'safe-area-inset-bottom', 'safe-area-inset-left',
+    'viewport-segment-width 0 0', 'viewport-segment-height 0 0', 'viewport-segment-top 0 0', 'viewport-segment-left 0 0',
+    'viewport-segment-bottom 0 0', 'viewport-segment-right 0 0',
+    'viewport-segment-width 1 0', 'viewport-segment-left 1 0', 'viewport-segment-width 0 1', 'viewport-segment-top 0 1', 'viewport-segment-height 0 1',
+    'fold-top', 'fold-left', 'fold-width', 'fold-height']) r.env[n] = cssEnv(n);
+  r.units = (() => {
+    const el = document.createElement('div');
+    el.style.cssText = 'position:fixed;visibility:hidden;width:100vw;height:100lvh;min-height:100svh;max-height:100dvh';
+    document.body.appendChild(el);
+    const g = (prop, v) => { el.style.height = v; return getComputedStyle(el).height; };
+    el.style.minHeight = el.style.maxHeight = '';
+    const o = { lvh: g('h', '100lvh'), svh: g('h', '100svh'), dvh: g('h', '100dvh'), vh: g('h', '100vh'), in1: g('h', '1in'), cm1: g('h', '1cm') };
+    el.remove();
+    return o;
+  })();
+  r.fullscreen = { enabled: document.fullscreenEnabled, webkit: document.webkitFullscreenEnabled,
+    request: typeof document.documentElement.requestFullscreen, webkitRequest: typeof document.documentElement.webkitRequestFullscreen };
+  r.standalone = navigator.standalone;
+  r.gl = (() => {
+    const o = {};
+    for (const kind of ['webgl2', 'webgl']) {
+      const c = document.createElement('canvas');
+      const gl = c.getContext(kind, { antialias: true });
+      if (!gl) { o[kind] = null; continue; }
+      const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      o[kind] = { version: gl.getParameter(gl.VERSION), glsl: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+        renderer: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+        maxTex: gl.getParameter(gl.MAX_TEXTURE_SIZE), maxRB: gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),
+        maxSamples: kind === 'webgl2' ? gl.getParameter(gl.MAX_SAMPLES) : null,
+        maxViewport: [...gl.getParameter(gl.MAX_VIEWPORT_DIMS)],
+        maxFragUniformVectors: gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS),
+        maxUBOSize: kind === 'webgl2' ? gl.getParameter(gl.MAX_UNIFORM_BLOCK_SIZE) : null,
+        antialias: gl.getContextAttributes().antialias,
+        ext: (gl.getSupportedExtensions() || []).filter(e => /float|depth|aniso|srgb|clip|provoking|multi_draw/i.test(e)) };
+    }
+    return o;
+  })();
+  r.webgpu = 'gpu' in navigator ? 'present' : 'absent';
+  if (navigator.gpu) {
+    try { const a = await navigator.gpu.requestAdapter(); r.webgpu = a ? { adapter: true, features: [...a.features].slice(0, 40) } : 'no adapter'; }
+    catch (e) { r.webgpu = 'error ' + e; }
+  }
+  r.camera = { mediaDevices: !!navigator.mediaDevices, getUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia), secure: isSecureContext };
+  try {
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    r.camera.devices = devs.map(d => ({ kind: d.kind, label: d.label, id: d.deviceId ? 'yes' : '' }));
+  } catch (e) { r.camera.devices = 'error ' + e; }
+  r.detectors = { FaceDetector: 'FaceDetector' in window, BarcodeDetector: 'BarcodeDetector' in window,
+    requestVideoFrameCallback: 'requestVideoFrameCallback' in HTMLVideoElement.prototype,
+    OffscreenCanvas: 'OffscreenCanvas' in window, VideoFrame: 'VideoFrame' in window, createImageBitmap: 'createImageBitmap' in window,
+    wasmSimd: (() => { try { return WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11])); } catch (e) { return 'err'; } })(),
+    sharedArrayBuffer: typeof SharedArrayBuffer, crossOriginIsolated: self.crossOriginIsolated };
+  r.sensors = { DeviceOrientationEvent: 'DeviceOrientationEvent' in window,
+    orientationPermission: typeof (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission),
+    DeviceMotionEvent: 'DeviceMotionEvent' in window, motionPermission: typeof (window.DeviceMotionEvent && DeviceMotionEvent.requestPermission),
+    lastOrientation: window.__lastOrientation || null };
+  r.misc = { wakeLock: 'wakeLock' in navigator, serviceWorker: 'serviceWorker' in navigator, gamepad: 'getGamepads' in navigator,
+    pointerEvents: 'PointerEvent' in window, maxTouchPoints: navigator.maxTouchPoints, hardwareConcurrency: navigator.hardwareConcurrency,
+    raf: window.__rafHz || null, hdr: mq('(dynamic-range: high)') };
+  r.events = events.slice();
+  return r;
+}
+
+async function report() {
+  const r = await gather();
+  const text = JSON.stringify(r, null, 1);
+  out.textContent = text;
+  try { await fetch('/__report/probe.json', { method: 'POST', body: text }); } catch (e) {}
+}
+
+addEventListener('resize', () => { log('resize ' + innerWidth + 'x' + innerHeight); report(); });
+if (window.visualViewport) visualViewport.addEventListener('resize', () => { log('vv.resize ' + visualViewport.width + 'x' + visualViewport.height); report(); });
+if (navigator.devicePosture) navigator.devicePosture.addEventListener('change', () => { log('posture ' + navigator.devicePosture.type); report(); });
+if (screen.orientation) screen.orientation.addEventListener('change', () => { log('orientation ' + screen.orientation.type); report(); });
+addEventListener('deviceorientation', e => { window.__lastOrientation = { a: e.alpha, b: e.beta, g: e.gamma }; });
+for (const q of ['(device-posture: folded)', '(horizontal-viewport-segments: 2)', '(vertical-viewport-segments: 2)']) {
+  try { matchMedia(q).addEventListener('change', e => { log('mq ' + q + ' -> ' + e.matches); report(); }); } catch (e) {}
+}
+// Frame rate
+(() => { let n = 0, t0 = performance.now(); const tick = t => { n++; if (t - t0 > 1000) { window.__rafHz = Math.round(n * 1000 / (t - t0)); n = 0; t0 = t; } requestAnimationFrame(tick); }; requestAnimationFrame(tick); })();
+report();
+setInterval(report, 1500);
+</script>
+</body>
+</html>

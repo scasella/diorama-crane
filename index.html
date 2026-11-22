@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Diorama Crane</title>
+<meta name="description" content="A claw machine you look into: the picture is redrawn for where your eyes are.">
+<!-- Added to the Home Screen, the page runs full screen with no browser toolbar. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Diorama Crane">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="view" tabindex="0" aria-label="Claw machine cabinet. Drag to look around. Arrow keys move the claw, space drops it."></canvas>
+
+<div id="foldLine" hidden></div>
+
+<div id="hud">
+  <div id="topBar">
+    <div class="chip score" id="score" aria-live="polite">WON 0</div>
+    <div class="chip" id="status"></div>
+    <button class="iconButton" id="menuButton" type="button" aria-label="View and depth options" aria-expanded="false" aria-controls="menu">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/><circle cx="15" cy="7" r="2" fill="currentColor"/><circle cx="9" cy="12" r="2" fill="currentColor"/><circle cx="17" cy="17" r="2" fill="currentColor"/></svg>
+    </button>
+  </div>
+
+  <div id="stick" role="application" aria-label="Claw stick. Drag to move the claw.">
+    <div id="knob"></div>
+  </div>
+  <button id="drop" type="button" aria-label="Drop the claw">DROP</button>
+
+  <div id="menu" role="dialog" aria-label="View and depth options" hidden>
+    <section>
+      <h2>Viewpoint</h2>
+      <label class="row"><span>Head tracking with camera<small id="cameraNote"></small></span><input type="checkbox" id="optCamera"></label>
+      <label class="row"><span>Sweep view when idle</span><input type="checkbox" id="optSweep"></label>
+      <button class="row action" type="button" id="optRecenter">Recenter view</button>
+    </section>
+    <section>
+      <h2>Fold</h2>
+      <label class="row"><span>Device is folded<small>Safari cannot read the hinge, so set it here.</small></span><input type="checkbox" id="optFold"></label>
+      <div class="row slider" id="foldAngleRow">
+        <label for="optFoldAngle">Hinge angle <output id="foldAngleOut"></output></label>
+        <input type="range" id="optFoldAngle" min="60" max="178" step="1">
+        <small>Adjust until the lines run straight across the fold.</small>
+      </div>
+      <div class="row stepper" id="foldNudgeRow">
+        <span>Fold line <output id="foldNudgeOut"></output></span>
+        <span class="buttons"><button type="button" id="foldNudgeMinus" aria-label="Move fold line back">−</button><button type="button" id="foldNudgePlus" aria-label="Move fold line forward">+</button></span>
+      </div>
+    </section>
+    <section>
+      <h2>Depth</h2>
+      <label class="row"><span>Red/cyan 3D glasses</span><input type="checkbox" id="optGlasses"></label>
+      <label class="row"><span>Fold preview<small>For flat screens: shows a folded device as the eye sees it.</small></span><input type="checkbox" id="optPreview"></label>
+    </section>
+    <section>
+      <h2>Game</h2>
+      <label class="row"><span>Self-play when idle</span><input type="checkbox" id="optAutoplay"></label>
+    </section>
+    <section>
+      <h2>Camera calibration</h2>
+      <label class="row"><span>Flip left/right</span><input type="checkbox" id="optFlipX"></label>
+      <label class="row"><span>Flip up/down</span><input type="checkbox" id="optFlipY"></label>
+      <div class="row slider">
+        <label for="optDistance">Viewing distance <output id="distanceOut"></output></label>
+        <input type="range" id="optDistance" min="50" max="180" step="5">
+        <small>Raise it if the cabinet looks too shallow as you move, lower it if too deep.</small>
+      </div>
+    </section>
+    <p class="tip" id="installTip" hidden>For full screen, open the Share menu and choose Add to Home Screen.</p>
+    <p class="tip build" id="buildInfo"></p>
+  </div>
+</div>
+
+<div id="notice" hidden></div>
+<video id="camera" playsinline muted autoplay aria-hidden="true"></video>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
